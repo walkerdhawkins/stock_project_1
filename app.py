@@ -337,6 +337,8 @@ if tickers:
             st.plotly_chart(fig_h, width="stretch")
         with tab_qq:
             (osm, osr), (slope, intercept, r) = probplot(s_rets, dist="norm")
+            # Ensure osm is a numpy array to avoid the ValueError
+            osm = np.array(osm) 
             fig_q = go.Figure()
             fig_q.add_trace(go.Scatter(x=osm, y=osr, mode='markers', marker=dict(size=4)))
             lx = np.array([osm.min(), osm.max()])
