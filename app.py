@@ -22,7 +22,7 @@ st.title("Multi-Stock Analysis Dashboard")
 st.sidebar.header("Settings")
 
 # --- NEW: About / Methodology Section ---
-with st.sidebar.expander("ℹ️ About & Methodology"):
+with st.sidebar.expander("About & Methodology"):
     st.write("""
     **Overview**
     This dashboard provides interactive performance analytics for a custom selection of stocks. 
