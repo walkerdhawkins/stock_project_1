@@ -147,7 +147,7 @@ if tickers:
             yaxis=dict(tickprefix="$", tickformat=","), 
             hovermode="x unified"
         )
-        st.plotly_chart(fig_growth, width= "stretch")
+        st.plotly_chart(fig_growth, width= "content")
 
         st.divider()
 
@@ -167,7 +167,7 @@ if tickers:
                 xaxis_title="Date",
                 yaxis_title="Price (Indexed to 100)"
             )
-            st.plotly_chart(fig_price, width="stretch")
+            st.plotly_chart(fig_price, width="content")
             
         with col_right:
             st.subheader(f"Rolling {vol_window}-Day Volatility")
@@ -183,7 +183,7 @@ if tickers:
                 yaxis_title="Ann. Volatility (%)",
                 yaxis=dict(tickformat=".0%")
             )
-            st.plotly_chart(fig_vol, width="stretch")
+            st.plotly_chart(fig_vol, width="content")
 
         # =======================================================
         # TWO-ASSET PORTFOLIO EXPLORER
@@ -242,7 +242,7 @@ if tickers:
                 template="plotly_white",
                 showlegend=False
             )
-            st.plotly_chart(fig_curve, width="stretch")
+            st.plotly_chart(fig_curve, width="content")
             st.caption(f"**Insight:** When correlation ({rho:.2f}) < 1.0, diversification can reduce total risk.")
 
         st.divider()
@@ -262,7 +262,7 @@ if tickers:
                 yaxis_title="Daily Return (%)",
                 yaxis=dict(tickformat=".2%")
             )
-            st.plotly_chart(fig_box, width="stretch")
+            st.plotly_chart(fig_box, width="content")
 
         with col_corr:
             st.subheader("Correlation Matrix")
@@ -274,7 +274,7 @@ if tickers:
                 xaxis_title="Ticker",
                 yaxis_title="Ticker"
             )
-            st.plotly_chart(fig_heat, width="stretch")
+            st.plotly_chart(fig_heat, width="content")
 
         # PAIRWISE RELATIONSHIP ANALYSIS
         st.subheader("Pairwise Relationship Analysis")
@@ -294,7 +294,7 @@ if tickers:
                     xaxis_title=f"{stock_x} Daily Returns",
                     yaxis_title=f"{stock_y} Daily Returns"
                 )
-                st.plotly_chart(fig_scatter, width="stretch")
+                st.plotly_chart(fig_scatter, width="content")
             with tab_roll_corr:
                 rolling_corr_series = daily_returns[stock_x].rolling(window=corr_window).corr(daily_returns[stock_y]).dropna()
                 fig_rolling_corr = go.Figure()
@@ -305,7 +305,7 @@ if tickers:
                     yaxis=dict(range=[-1.1, 1.1]), 
                     template="plotly_white"
                 )
-                st.plotly_chart(fig_rolling_corr, width="stretch")
+                st.plotly_chart(fig_rolling_corr, width="content")
 
         st.divider()
 
@@ -334,7 +334,7 @@ if tickers:
                 xaxis_title="Daily Return",
                 yaxis_title="Probability Density"
             )
-            st.plotly_chart(fig_h, width="stretch")
+            st.plotly_chart(fig_h, width="content")
         with tab_qq:
             (osm, osr), (slope, intercept, r) = probplot(s_rets, dist="norm")
             # Ensure osm is a numpy array to avoid the ValueError
@@ -348,7 +348,7 @@ if tickers:
                 xaxis_title="Theoretical Quantiles",
                 yaxis_title="Ordered Values (Actual Returns)"
             )
-            st.plotly_chart(fig_q, width="stretch")
+            st.plotly_chart(fig_q, width="content")
             st.write(f"**R-squared value:** {r**2:.4f}")
 
 else:
