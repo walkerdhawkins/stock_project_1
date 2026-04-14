@@ -21,6 +21,22 @@ st.title("Multi-Stock Analysis Dashboard")
 # -- Sidebar: user inputs --------------------------------
 st.sidebar.header("Settings")
 
+# --- NEW: About / Methodology Section ---
+with st.sidebar.expander("ℹ️ About & Methodology"):
+    st.write("""
+    **Overview**
+    This dashboard provides interactive performance analytics for a custom selection of stocks. 
+    It compares individual assets against an Equal-Weight Portfolio and the S&P 500 (^GSPC).
+    
+    **Key Assumptions**
+    * **Annualization:** All annualized metrics (Mean Return and Volatility) assume **252 trading days** in a year.
+    * **Returns:** Calculations are based on **simple arithmetic daily returns** (percentage change in adjusted closing price).
+    * **Hypothetical Growth:** The growth chart assumes a starting investment of $10,000 with daily rebalancing for the Equal-Weight Portfolio.
+    
+    **Data Source**
+    Market data is fetched in real-time via the [Yahoo Finance API](https://finance.yahoo.com/) (using the `yfinance` library).
+    """)
+
 ticker_input = st.sidebar.text_input("Enter 2-5 Tickers (separated by spaces)", value="AAPL MSFT").upper().strip()
 tickers = ticker_input.split()
 
@@ -123,7 +139,6 @@ if tickers:
             fig_growth.add_trace(go.Scatter(x=cum_growth.index, y=cum_growth[col], name=col,
                                             line=dict(width=l_width, dash=l_dash, color=l_color)))
         
-        # Added axis titles here
         fig_growth.update_layout(
             template="plotly_white", 
             height=450, 
@@ -146,7 +161,6 @@ if tickers:
                 fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[t], name=t))
             fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[benchmark_sym], name="S&P 500", line=dict(dash='dash', color='gray')))
             
-            # Added axis titles here
             fig_price.update_layout(
                 template="plotly_white", 
                 height=400,
@@ -162,7 +176,6 @@ if tickers:
             for t in tickers:
                 fig_vol.add_trace(go.Scatter(x=rolling_vol.index, y=rolling_vol[t], name=t))
             
-            # Added axis titles here
             fig_vol.update_layout(
                 template="plotly_white", 
                 height=400, 
@@ -173,7 +186,7 @@ if tickers:
             st.plotly_chart(fig_vol, use_container_width=True)
 
         # =======================================================
-        # NEW: TWO-ASSET PORTFOLIO EXPLORER
+        # TWO-ASSET PORTFOLIO EXPLORER
         # =======================================================
         st.divider()
         st.subheader("Two-Asset Portfolio Explorer")
@@ -220,7 +233,6 @@ if tickers:
             fig_curve.add_trace(go.Scatter(x=w_range, y=curve_vols, mode='lines', name='Volatility Curve', line=dict(color='blue')))
             fig_curve.add_trace(go.Scatter(x=[weight_a], y=[p_vol], mode='markers', name='Current Allocation', marker=dict(size=12, color='red')))
             
-            # Titles already existed here, ensuring they are clear
             fig_curve.update_layout(
                 title=f"Diversification Effect: {stock_a} & {stock_b}",
                 xaxis_title=f"Weight on {stock_a} (0.0 to 1.0)",
@@ -231,8 +243,7 @@ if tickers:
                 showlegend=False
             )
             st.plotly_chart(fig_curve, use_container_width=True)
-            
-            st.caption(f"**Insight:** This curve demonstrates the power of diversification. When the correlation ({rho:.2f}) is less than 1.0, the curved path 'dips' inward.")
+            st.caption(f"**Insight:** When correlation ({rho:.2f}) < 1.0, diversification can reduce total risk.")
 
         st.divider()
 
@@ -244,7 +255,6 @@ if tickers:
             for t in (tickers + [benchmark_sym, 'Equal-Weight Portfolio']):
                 fig_box.add_trace(go.Box(y=daily_returns[t], name=t, boxpoints='outliers'))
             
-            # Added axis titles here
             fig_box.update_layout(
                 template="plotly_white", 
                 height=450, 
@@ -259,7 +269,6 @@ if tickers:
             corr_matrix = daily_returns[tickers + [benchmark_sym]].corr()
             fig_heat = px.imshow(corr_matrix, text_auto='.2f', aspect="auto", color_continuous_scale='RdBu_r', color_continuous_midpoint=0)
             
-            # Added axis labels here
             fig_heat.update_layout(
                 height=450,
                 xaxis_title="Ticker",
@@ -281,8 +290,6 @@ if tickers:
             tab_scatter, tab_roll_corr = st.tabs(["Scatter Plot", "Rolling Correlation"])
             with tab_scatter:
                 fig_scatter = px.scatter(daily_returns, x=stock_x, y=stock_y, trendline="ols", trendline_color_override="red", template="plotly_white")
-                
-                # Added axis labels here
                 fig_scatter.update_layout(
                     xaxis_title=f"{stock_x} Daily Returns",
                     yaxis_title=f"{stock_y} Daily Returns"
@@ -292,8 +299,6 @@ if tickers:
                 rolling_corr_series = daily_returns[stock_x].rolling(window=corr_window).corr(daily_returns[stock_y]).dropna()
                 fig_rolling_corr = go.Figure()
                 fig_rolling_corr.add_trace(go.Scatter(x=rolling_corr_series.index, y=rolling_corr_series, mode='lines'))
-                
-                # Added axis labels here
                 fig_rolling_corr.update_layout(
                     xaxis_title="Date",
                     yaxis_title="Correlation Coefficient",
@@ -324,8 +329,6 @@ if tickers:
             fig_h.add_trace(go.Histogram(x=s_rets, histnorm='probability density', nbinsx=60))
             xr = np.linspace(s_rets.min(), s_rets.max(), 100)
             fig_h.add_trace(go.Scatter(x=xr, y=norm.pdf(xr, mu, std), line=dict(color='red', width=3)))
-            
-            # Added axis labels here
             fig_h.update_layout(
                 template="plotly_white",
                 xaxis_title="Daily Return",
@@ -338,8 +341,6 @@ if tickers:
             fig_q.add_trace(go.Scatter(x=osm, y=osr, mode='markers', marker=dict(size=4)))
             lx = np.array([osm.min(), osm.max()])
             fig_q.add_trace(go.Scatter(x=lx, y=intercept + slope*lx, mode='lines', line=dict(color='red')))
-            
-            # Added axis labels here
             fig_q.update_layout(
                 template="plotly_white",
                 xaxis_title="Theoretical Quantiles",
