@@ -147,7 +147,7 @@ if tickers:
             yaxis=dict(tickprefix="$", tickformat=","), 
             hovermode="x unified"
         )
-        st.plotly_chart(fig_growth, width= "content")
+        st.plotly_chart(fig_growth, width="content")
 
         st.divider()
 
