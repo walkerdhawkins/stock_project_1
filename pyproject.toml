@@ -1,0 +1,34 @@
+[project]
+name = "walkerhawkins"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "ipykernel>=6.31.0",
+    "lxml>=6.0.2",
+    "matplotlib>=3.9.4",
+    "numpy>=2.0.2",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.3",
+    "pandas-datareader>=0.10.0",
+    "plotly>=6.6.0",
+    "pyarrow>=21.0.0",
+    "requests>=2.32.5",
+    "scikit-learn>=1.6.1",
+    "scipy>=1.13.1",
+    "seaborn>=0.13.2",
+    "statsmodels>=0.14.6",
+    "streamlit>=1.50.0",
+    "yfinance>=1.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "Desktop/School/Junior Year/Spring Semester/FDA/FDA_Python",
+    "Desktop/School/Junior Year/Spring Semester/FDA/stock_analysis_app",
+    "Desktop/School/Junior Year/Spring Semester/FDA/stock_app_project1",
+    "Desktop/School/Junior Year/Spring Semester/FDA/stock_app_project_1",
+    "Desktop/School/Junior Year/Spring Semester/FDA/stock_app_project_1/stock-analysis-app",
+    "stock_project_1",
+    "stock_project_1/stock-analysis-app",
+]
