@@ -85,6 +85,43 @@ def load_data(ticker_list, start, end):
     
     return data, failed_tickers
 
+# -- Data cleaning: handle partial/misaligned data -----------
+def clean_data_for_misalignment(close_df, ticker_list, benchmark_ticker):
+    """
+    Handle partial data by:
+    1. Truncating to overlapping date range across all tickers
+    2. Checking for >5% missing values and dropping those tickers
+    3. Returning cleaned data and a list of warnings
+    """
+    warnings = []
+    original_tickers = ticker_list.copy()
+    
+    # Step 1: Check for missing values and drop tickers with >5% NaN
+    valid_tickers = []
+    for ticker in ticker_list:
+        if ticker in close_df.columns:
+            missing_pct = close_df[ticker].isna().sum() / len(close_df)
+            if missing_pct > 0.05:
+                warnings.append(f"⚠️ **{ticker}** dropped: {missing_pct:.1%} missing data (threshold: 5%)")
+            else:
+                valid_tickers.append(ticker)
+        else:
+            warnings.append(f"⚠️ **{ticker}** not found in downloaded data")
+    
+    if not valid_tickers:
+        return None, warnings
+    
+    # Step 2: Truncate to overlapping date range (remove leading/trailing NaNs)
+    all_cols = valid_tickers + [benchmark_ticker]
+    subset = close_df[all_cols].dropna()
+    
+    if len(subset) < len(close_df):
+        original_range = f"{close_df.index[0].date()} to {close_df.index[-1].date()}"
+        truncated_range = f"{subset.index[0].date()} to {subset.index[-1].date()}"
+        warnings.append(f"📊 Data truncated to overlapping range: {truncated_range} (from {original_range})")
+    
+    return subset, warnings
+
 # -- Expensive calculations with caching ------------------
 @st.cache_data
 def calculate_metrics(returns_df, ticker_list, benchmark_ticker):
@@ -121,9 +158,26 @@ if tickers:
     if df_raw is not None:
         close_data = df_raw["Close"]
         benchmark_sym = "^GSPC"
-        raw_returns = close_data.pct_change(fill_method=None).dropna()
         
-        stats_raw, daily_returns = calculate_metrics(raw_returns, tickers, benchmark_sym)
+        # Clean data for misalignment and partial data
+        cleaned_data, data_warnings = clean_data_for_misalignment(close_data, tickers, benchmark_sym)
+        
+        if cleaned_data is None:
+            st.error("❌ No valid data available. Please check your ticker symbols and date range.")
+            st.stop()
+        
+        # Display warnings if any
+        if data_warnings:
+            with st.expander("⚠️ Data Quality Notes", expanded=len(data_warnings) > 0):
+                for warning in data_warnings:
+                    st.write(warning)
+        
+        # Update tickers to only include valid ones after cleaning
+        valid_tickers = [t for t in tickers if t in cleaned_data.columns and t != benchmark_sym]
+        
+        raw_returns = cleaned_data.pct_change(fill_method=None).dropna()
+        
+        stats_raw, daily_returns = calculate_metrics(raw_returns, valid_tickers, benchmark_sym)
 
         # 1. STATISTICAL PERFORMANCE SUMMARY
         st.subheader("Statistical Performance Summary")
@@ -137,9 +191,9 @@ if tickers:
         # 2. HYPOTHETICAL $10,000 INVESTMENT GROWTH
         st.subheader("Growth of Hypothetical $10,000 Investment")
         investment_start = 10000
-        plot_cols = tickers + [benchmark_sym, 'Equal-Weight Portfolio']
+        plot_cols = valid_tickers + [benchmark_sym, 'Equal-Weight Portfolio']
         cum_growth = (1 + daily_returns[plot_cols]).cumprod() * investment_start
-        start_row = pd.DataFrame(investment_start, index=[close_data.index[0]], columns=plot_cols)
+        start_row = pd.DataFrame(investment_start, index=[cleaned_data.index[0]], columns=plot_cols)
         cum_growth = pd.concat([start_row, cum_growth])
 
         fig_growth = go.Figure()
@@ -166,25 +220,37 @@ if tickers:
         col_left, col_right = st.columns(2)
         with col_left:
             st.subheader("Normalized Prices (Base 100)")
-            norm_df = (close_data / close_data.iloc[0]) * 100
-            fig_price = go.Figure()
-            for t in tickers:
-                fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[t], name=t))
-            fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[benchmark_sym], name="S&P 500", line=dict(dash='dash', color='gray')))
             
-            fig_price.update_layout(
-                template="plotly_white", 
-                height=400,
-                xaxis_title="Date",
-                yaxis_title="Price (Indexed to 100)"
+            # Multi-select widget for stock selection
+            price_chart_tickers = st.multiselect(
+                "Select stocks to display:",
+                options=valid_tickers,
+                default=valid_tickers,
+                key="price_chart_select"
             )
-            st.plotly_chart(fig_price, width="content")
+            
+            if price_chart_tickers:
+                norm_df = (cleaned_data / cleaned_data.iloc[0]) * 100
+                fig_price = go.Figure()
+                for t in price_chart_tickers:
+                    fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[t], name=t))
+                fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[benchmark_sym], name="S&P 500", line=dict(dash='dash', color='gray')))
+                
+                fig_price.update_layout(
+                    template="plotly_white", 
+                    height=400,
+                    xaxis_title="Date",
+                    yaxis_title="Price (Indexed to 100)"
+                )
+                st.plotly_chart(fig_price, width="content")
+            else:
+                st.info("Select at least one stock to display.")
             
         with col_right:
             st.subheader(f"Rolling {vol_window}-Day Volatility")
             rolling_vol = daily_returns.rolling(window=vol_window).std() * math.sqrt(252)
             fig_vol = go.Figure()
-            for t in tickers:
+            for t in valid_tickers:
                 fig_vol.add_trace(go.Scatter(x=rolling_vol.index, y=rolling_vol[t], name=t))
             
             fig_vol.update_layout(
@@ -206,8 +272,8 @@ if tickers:
         
         with pexp_col1:
             st.write("Construct a custom 2-asset portfolio:")
-            stock_a = st.selectbox("Select Asset A", options=tickers, index=0)
-            stock_b = st.selectbox("Select Asset B", options=tickers, index=min(1, len(tickers)-1))
+            stock_a = st.selectbox("Select Asset A", options=valid_tickers, index=0)
+            stock_b = st.selectbox("Select Asset B", options=valid_tickers, index=min(1, len(valid_tickers)-1))
             
             weight_a = st.slider(f"Weight on {stock_a} (%)", 0, 100, 50) / 100
             weight_b = 1.0 - weight_a
@@ -263,7 +329,7 @@ if tickers:
         with col_box:
             st.subheader("Return Distributions (Box Plot)")
             fig_box = go.Figure()
-            for t in (tickers + [benchmark_sym, 'Equal-Weight Portfolio']):
+            for t in (valid_tickers + [benchmark_sym, 'Equal-Weight Portfolio']):
                 fig_box.add_trace(go.Box(y=daily_returns[t], name=t, boxpoints='outliers'))
             
             fig_box.update_layout(
@@ -277,7 +343,7 @@ if tickers:
 
         with col_corr:
             st.subheader("Correlation Matrix")
-            corr_matrix = daily_returns[tickers + [benchmark_sym]].corr()
+            corr_matrix = daily_returns[valid_tickers + [benchmark_sym]].corr()
             fig_heat = px.imshow(corr_matrix, text_auto='.2f', aspect="auto", color_continuous_scale='RdBu_r', color_continuous_midpoint=0)
             
             fig_heat.update_layout(
@@ -289,7 +355,7 @@ if tickers:
 
         # PAIRWISE RELATIONSHIP ANALYSIS
         st.subheader("Pairwise Relationship Analysis")
-        all_options = tickers + [benchmark_sym, 'Equal-Weight Portfolio']
+        all_options = valid_tickers + [benchmark_sym, 'Equal-Weight Portfolio']
         pair_col1, pair_col2 = st.columns([1, 3])
         with pair_col1:
             stock_x = st.selectbox("Stock X", options=all_options, key="sx")
@@ -322,7 +388,7 @@ if tickers:
 
         # 4. DETAILED NORMALITY ANALYSIS
         st.subheader("Detailed Normality Analysis")
-        selected_stock = st.selectbox("Select Ticker for Analysis", options=tickers + [benchmark_sym, 'Equal-Weight Portfolio'], key="norm_sel")
+        selected_stock = st.selectbox("Select Ticker for Analysis", options=valid_tickers + [benchmark_sym, 'Equal-Weight Portfolio'], key="norm_sel")
         s_rets = daily_returns[selected_stock]
         
         # Validate sufficient data for statistical tests
