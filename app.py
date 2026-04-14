@@ -8,6 +8,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 import numpy as np
 from scipy.stats import norm, probplot, jarque_bera
 from datetime import date, timedelta
@@ -46,6 +47,7 @@ if start_date >= end_date:
     st.stop()
 
 vol_window = st.sidebar.slider("Rolling Volatility Window (Days)", min_value=10, max_value=120, value=30, step=5)
+corr_window = st.sidebar.slider("Rolling Correlation Window (Days)", min_value=20, max_value=150, value=60, step=5)
 
 # -- Data download with caching ---------------------------
 @st.cache_data(show_spinner="Fetching data...", ttl=3600)
@@ -71,12 +73,12 @@ def calculate_metrics(returns_df, ticker_list, benchmark_ticker):
     for t in all_cols:
         stats.append({
             "Ticker": t,
-            "Ann. Mean Return": f"{(returns_df[t].mean() * 252):.2%}",
-            "Ann. Volatility": f"{(returns_df[t].std() * math.sqrt(252)):.2%}",
-            "Skewness": f"{returns_df[t].skew():.4f}",
-            "Kurtosis": f"{returns_df[t].kurtosis():.4f}",
-            "Min Daily Return": f"{returns_df[t].min():.2%}",
-            "Max Daily Return": f"{returns_df[t].max():.2%}"
+            "Ann. Mean Return": returns_df[t].mean() * 252,
+            "Ann. Volatility": returns_df[t].std() * math.sqrt(252),
+            "Skewness": returns_df[t].skew(),
+            "Kurtosis": returns_df[t].kurtosis(),
+            "Min Daily Return": returns_df[t].min(),
+            "Max Daily Return": returns_df[t].max()
         })
     return pd.DataFrame(stats).set_index("Ticker"), returns_df
 
@@ -94,11 +96,14 @@ if tickers:
         benchmark_sym = "^GSPC"
         raw_returns = close_data.pct_change().dropna()
         
-        stats_df, daily_returns = calculate_metrics(raw_returns, tickers, benchmark_sym)
+        stats_raw, daily_returns = calculate_metrics(raw_returns, tickers, benchmark_sym)
 
         # 1. STATISTICAL PERFORMANCE SUMMARY
         st.subheader("Statistical Performance Summary")
-        st.table(stats_df)
+        disp_stats = stats_raw.copy()
+        for col in ["Ann. Mean Return", "Ann. Volatility", "Min Daily Return", "Max Daily Return"]:
+            disp_stats[col] = disp_stats[col].apply(lambda x: f"{x:.2%}")
+        st.table(disp_stats)
 
         st.divider()
 
@@ -117,12 +122,21 @@ if tickers:
             l_color = 'black' if col == 'Equal-Weight Portfolio' else None
             fig_growth.add_trace(go.Scatter(x=cum_growth.index, y=cum_growth[col], name=col,
                                             line=dict(width=l_width, dash=l_dash, color=l_color)))
-        fig_growth.update_layout(template="plotly_white", height=450, yaxis=dict(tickprefix="$", tickformat=","), hovermode="x unified")
+        
+        # Added axis titles here
+        fig_growth.update_layout(
+            template="plotly_white", 
+            height=450, 
+            xaxis_title="Date",
+            yaxis_title="Portfolio Value (USD)",
+            yaxis=dict(tickprefix="$", tickformat=","), 
+            hovermode="x unified"
+        )
         st.plotly_chart(fig_growth, use_container_width=True)
 
         st.divider()
 
-        # 3. VISUAL ANALYSIS (Normalized Prices & Volatility)
+        # 3. VISUAL ANALYSIS & COMPARISONS
         col_left, col_right = st.columns(2)
         with col_left:
             st.subheader("Normalized Prices (Base 100)")
@@ -131,73 +145,206 @@ if tickers:
             for t in tickers:
                 fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[t], name=t))
             fig_price.add_trace(go.Scatter(x=norm_df.index, y=norm_df[benchmark_sym], name="S&P 500", line=dict(dash='dash', color='gray')))
-            fig_price.update_layout(template="plotly_white", height=400)
+            
+            # Added axis titles here
+            fig_price.update_layout(
+                template="plotly_white", 
+                height=400,
+                xaxis_title="Date",
+                yaxis_title="Price (Indexed to 100)"
+            )
             st.plotly_chart(fig_price, use_container_width=True)
+            
         with col_right:
             st.subheader(f"Rolling {vol_window}-Day Volatility")
             rolling_vol = daily_returns.rolling(window=vol_window).std() * math.sqrt(252)
             fig_vol = go.Figure()
             for t in tickers:
                 fig_vol.add_trace(go.Scatter(x=rolling_vol.index, y=rolling_vol[t], name=t))
-            fig_vol.update_layout(template="plotly_white", height=400, yaxis=dict(tickformat=".0%"))
+            
+            # Added axis titles here
+            fig_vol.update_layout(
+                template="plotly_white", 
+                height=400, 
+                xaxis_title="Date",
+                yaxis_title="Ann. Volatility (%)",
+                yaxis=dict(tickformat=".0%")
+            )
             st.plotly_chart(fig_vol, use_container_width=True)
+
+        # =======================================================
+        # NEW: TWO-ASSET PORTFOLIO EXPLORER
+        # =======================================================
+        st.divider()
+        st.subheader("Two-Asset Portfolio Explorer")
         
+        pexp_col1, pexp_col2 = st.columns([1, 2])
+        
+        with pexp_col1:
+            st.write("Construct a custom 2-asset portfolio:")
+            stock_a = st.selectbox("Select Asset A", options=tickers, index=0)
+            stock_b = st.selectbox("Select Asset B", options=tickers, index=min(1, len(tickers)-1))
+            
+            weight_a = st.slider(f"Weight on {stock_a} (%)", 0, 100, 50) / 100
+            weight_b = 1.0 - weight_a
+            st.write(f"Weight on {stock_b}: {weight_b:.0%}")
+            
+            mu_a = stats_raw.loc[stock_a, "Ann. Mean Return"]
+            mu_b = stats_raw.loc[stock_b, "Ann. Mean Return"]
+            sigma_a = stats_raw.loc[stock_a, "Ann. Volatility"]
+            sigma_b = stats_raw.loc[stock_b, "Ann. Volatility"]
+            rho = daily_returns[stock_a].corr(daily_returns[stock_b])
+            
+            p_ret = (weight_a * mu_a) + (weight_b * mu_b)
+            p_vol = math.sqrt(
+                (weight_a**2 * sigma_a**2) + 
+                (weight_b**2 * sigma_b**2) + 
+                (2 * weight_a * weight_b * sigma_a * sigma_b * rho)
+            )
+            
+            st.metric("Portfolio Ann. Return", f"{p_ret:.2%}")
+            st.metric("Portfolio Ann. Volatility", f"{p_vol:.2%}")
+
+        with pexp_col2:
+            w_range = np.linspace(0, 1, 101)
+            curve_vols = []
+            for w in w_range:
+                v = math.sqrt(
+                    (w**2 * sigma_a**2) + 
+                    ((1-w)**2 * sigma_b**2) + 
+                    (2 * w * (1-w) * sigma_a * sigma_b * rho)
+                )
+                curve_vols.append(v)
+            
+            fig_curve = go.Figure()
+            fig_curve.add_trace(go.Scatter(x=w_range, y=curve_vols, mode='lines', name='Volatility Curve', line=dict(color='blue')))
+            fig_curve.add_trace(go.Scatter(x=[weight_a], y=[p_vol], mode='markers', name='Current Allocation', marker=dict(size=12, color='red')))
+            
+            # Titles already existed here, ensuring they are clear
+            fig_curve.update_layout(
+                title=f"Diversification Effect: {stock_a} & {stock_b}",
+                xaxis_title=f"Weight on {stock_a} (0.0 to 1.0)",
+                yaxis_title="Annualized Volatility (%)",
+                xaxis=dict(tickformat=".0%"),
+                yaxis=dict(tickformat=".2%"),
+                template="plotly_white",
+                showlegend=False
+            )
+            st.plotly_chart(fig_curve, use_container_width=True)
+            
+            st.caption(f"**Insight:** This curve demonstrates the power of diversification. When the correlation ({rho:.2f}) is less than 1.0, the curved path 'dips' inward.")
+
         st.divider()
 
-        # =======================================================
-        # NEW: SIDE-BY-SIDE BOX PLOT
-        # =======================================================
-        st.subheader("Daily Return Distribution Comparison (Box Plot)")
-        fig_box = go.Figure()
-        for t in (tickers + [benchmark_sym, 'Equal-Weight Portfolio']):
-            fig_box.add_trace(go.Box(
-                y=daily_returns[t],
-                name=t,
-                boxpoints='outliers', # Show only outliers
-                notched=True # Notches represent confidence interval of the median
-            ))
-        fig_box.update_layout(
-            template="plotly_white",
-            height=500,
-            yaxis_title="Daily Return (%)",
-            yaxis=dict(tickformat=".2%")
-        )
-        st.plotly_chart(fig_box, use_container_width=True)
-        # =======================================================
+        # BOX PLOT & CORRELATION HEATMAP
+        col_box, col_corr = st.columns(2)
+        with col_box:
+            st.subheader("Return Distributions (Box Plot)")
+            fig_box = go.Figure()
+            for t in (tickers + [benchmark_sym, 'Equal-Weight Portfolio']):
+                fig_box.add_trace(go.Box(y=daily_returns[t], name=t, boxpoints='outliers'))
+            
+            # Added axis titles here
+            fig_box.update_layout(
+                template="plotly_white", 
+                height=450, 
+                xaxis_title="Ticker / Asset",
+                yaxis_title="Daily Return (%)",
+                yaxis=dict(tickformat=".2%")
+            )
+            st.plotly_chart(fig_box, use_container_width=True)
+
+        with col_corr:
+            st.subheader("Correlation Matrix")
+            corr_matrix = daily_returns[tickers + [benchmark_sym]].corr()
+            fig_heat = px.imshow(corr_matrix, text_auto='.2f', aspect="auto", color_continuous_scale='RdBu_r', color_continuous_midpoint=0)
+            
+            # Added axis labels here
+            fig_heat.update_layout(
+                height=450,
+                xaxis_title="Ticker",
+                yaxis_title="Ticker"
+            )
+            st.plotly_chart(fig_heat, use_container_width=True)
+
+        # PAIRWISE RELATIONSHIP ANALYSIS
+        st.subheader("Pairwise Relationship Analysis")
+        all_options = tickers + [benchmark_sym, 'Equal-Weight Portfolio']
+        pair_col1, pair_col2 = st.columns([1, 3])
+        with pair_col1:
+            stock_x = st.selectbox("Stock X", options=all_options, key="sx")
+            stock_y = st.selectbox("Stock Y", options=all_options, key="sy", index=1)
+            current_corr = daily_returns[stock_x].corr(daily_returns[stock_y])
+            st.metric(f"Overall Correlation", f"{current_corr:.4f}")
+
+        with pair_col2:
+            tab_scatter, tab_roll_corr = st.tabs(["Scatter Plot", "Rolling Correlation"])
+            with tab_scatter:
+                fig_scatter = px.scatter(daily_returns, x=stock_x, y=stock_y, trendline="ols", trendline_color_override="red", template="plotly_white")
+                
+                # Added axis labels here
+                fig_scatter.update_layout(
+                    xaxis_title=f"{stock_x} Daily Returns",
+                    yaxis_title=f"{stock_y} Daily Returns"
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+            with tab_roll_corr:
+                rolling_corr_series = daily_returns[stock_x].rolling(window=corr_window).corr(daily_returns[stock_y]).dropna()
+                fig_rolling_corr = go.Figure()
+                fig_rolling_corr.add_trace(go.Scatter(x=rolling_corr_series.index, y=rolling_corr_series, mode='lines'))
+                
+                # Added axis labels here
+                fig_rolling_corr.update_layout(
+                    xaxis_title="Date",
+                    yaxis_title="Correlation Coefficient",
+                    yaxis=dict(range=[-1.1, 1.1]), 
+                    template="plotly_white"
+                )
+                st.plotly_chart(fig_rolling_corr, use_container_width=True)
 
         st.divider()
 
-        # 4. DISTRIBUTION ANALYSIS (Deep Dive)
+        # 4. DETAILED NORMALITY ANALYSIS
         st.subheader("Detailed Normality Analysis")
-        selected_stock = st.selectbox("Select Ticker for Distribution Analysis", options=tickers + [benchmark_sym, 'Equal-Weight Portfolio'])
+        selected_stock = st.selectbox("Select Ticker for Analysis", options=tickers + [benchmark_sym, 'Equal-Weight Portfolio'], key="norm_sel")
         s_rets = daily_returns[selected_stock]
-
         jb_stat, jb_p = jarque_bera(s_rets)
         jb_col1, jb_col2, jb_col3 = st.columns(3)
         jb_col1.metric("Jarque-Bera Stat", f"{jb_stat:.2f}")
         jb_col2.metric("p-value", f"{jb_p:.4f}")
-        
         if jb_p < 0.05:
             jb_col3.error("Rejects normality (p < 0.05)")
         else:
             jb_col3.success("Fails to reject normality (p >= 0.05)")
 
-        tab1, tab2 = st.tabs(["Histogram & Fit", "Q-Q Plot"])
-        with tab1:
+        tab_hist, tab_qq = st.tabs(["Histogram & Fit", "Q-Q Plot"])
+        with tab_hist:
             mu, std = norm.fit(s_rets)
             fig_h = go.Figure()
-            fig_h.add_trace(go.Histogram(x=s_rets, histnorm='probability density', name='Actual', nbinsx=60))
+            fig_h.add_trace(go.Histogram(x=s_rets, histnorm='probability density', nbinsx=60))
             xr = np.linspace(s_rets.min(), s_rets.max(), 100)
-            fig_h.add_trace(go.Scatter(x=xr, y=norm.pdf(xr, mu, std), name='Normal Fit', line=dict(color='red', width=3)))
-            fig_h.update_layout(template="plotly_white", title=f"Distribution for {selected_stock}")
+            fig_h.add_trace(go.Scatter(x=xr, y=norm.pdf(xr, mu, std), line=dict(color='red', width=3)))
+            
+            # Added axis labels here
+            fig_h.update_layout(
+                template="plotly_white",
+                xaxis_title="Daily Return",
+                yaxis_title="Probability Density"
+            )
             st.plotly_chart(fig_h, use_container_width=True)
-        with tab2:
+        with tab_qq:
             (osm, osr), (slope, intercept, r) = probplot(s_rets, dist="norm")
             fig_q = go.Figure()
-            fig_q.add_trace(go.Scatter(x=osm, y=osr, mode='markers', name='Quantiles', marker=dict(color='blue', size=4)))
+            fig_q.add_trace(go.Scatter(x=osm, y=osr, mode='markers', marker=dict(size=4)))
             lx = np.array([osm.min(), osm.max()])
-            fig_q.add_trace(go.Scatter(x=lx, y=intercept + slope*lx, mode='lines', name='Ref Line', line=dict(color='red')))
-            fig_q.update_layout(template="plotly_white", title=f"Q-Q Plot for {selected_stock}")
+            fig_q.add_trace(go.Scatter(x=lx, y=intercept + slope*lx, mode='lines', line=dict(color='red')))
+            
+            # Added axis labels here
+            fig_q.update_layout(
+                template="plotly_white",
+                xaxis_title="Theoretical Quantiles",
+                yaxis_title="Ordered Values (Actual Returns)"
+            )
             st.plotly_chart(fig_q, use_container_width=True)
             st.write(f"**R-squared value:** {r**2:.4f}")
 
