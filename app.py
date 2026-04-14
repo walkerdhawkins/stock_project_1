@@ -115,6 +115,10 @@ def clean_data_for_misalignment(close_df, ticker_list, benchmark_ticker):
     all_cols = valid_tickers + [benchmark_ticker]
     subset = close_df[all_cols].dropna()
     
+    if len(subset) == 0:
+        warnings.append("❌ No overlapping data found across all tickers for the selected date range.")
+        return None, warnings
+    
     if len(subset) < len(close_df):
         original_range = f"{close_df.index[0].date()} to {close_df.index[-1].date()}"
         truncated_range = f"{subset.index[0].date()} to {subset.index[-1].date()}"
