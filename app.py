@@ -70,7 +70,12 @@ corr_window = st.sidebar.slider("Rolling Correlation Window (Days)", min_value=2
 def load_data(ticker_list, start, end):
     benchmark = ["^GSPC"]
     all_tickers = ticker_list + benchmark
-    data = yf.download(all_tickers, start=start, end=end, progress=False, auto_adjust=True)
+    try:
+        data = yf.download(all_tickers, start=start, end=end, progress=False, auto_adjust=True)
+    except Exception as e:
+        if "Rate limited" in str(e) or "Too Many Requests" in str(e):
+            return None, ticker_list + ["RATE_LIMIT_ERROR"]
+        raise
     
     if data.empty:
         return None, ticker_list
@@ -103,14 +108,20 @@ if tickers:
     df_raw, failed = load_data(tickers, start_date, end_date)
     
     if failed:
+        if "RATE_LIMIT_ERROR" in failed:
+            st.error(
+                "❌ **Rate Limit Error**: Yahoo Finance is currently limiting requests. "
+                "This can happen during high-traffic periods. Please try again in a few moments."
+            )
         for f_ticker in failed:
-            st.error(f"Error: Failed to download data for **{f_ticker}**.")
+            if f_ticker != "RATE_LIMIT_ERROR":
+                st.error(f"Error: Failed to download data for **{f_ticker}**.")
         st.stop()
     
     if df_raw is not None:
         close_data = df_raw["Close"]
         benchmark_sym = "^GSPC"
-        raw_returns = close_data.pct_change().dropna()
+        raw_returns = close_data.pct_change(fill_method=None).dropna()
         
         stats_raw, daily_returns = calculate_metrics(raw_returns, tickers, benchmark_sym)
 
@@ -313,43 +324,53 @@ if tickers:
         st.subheader("Detailed Normality Analysis")
         selected_stock = st.selectbox("Select Ticker for Analysis", options=tickers + [benchmark_sym, 'Equal-Weight Portfolio'], key="norm_sel")
         s_rets = daily_returns[selected_stock]
-        jb_stat, jb_p = jarque_bera(s_rets)
-        jb_col1, jb_col2, jb_col3 = st.columns(3)
-        jb_col1.metric("Jarque-Bera Stat", f"{jb_stat:.2f}")
-        jb_col2.metric("p-value", f"{jb_p:.4f}")
-        if jb_p < 0.05:
-            jb_col3.error("Rejects normality (p < 0.05)")
+        
+        # Validate sufficient data for statistical tests
+        if len(s_rets) < 20:
+            st.warning(f"⚠️ Insufficient data for normality test (need ≥20 samples, have {len(s_rets)}). Please select a longer date range.")
         else:
-            jb_col3.success("Fails to reject normality (p >= 0.05)")
+            jb_stat, jb_p = jarque_bera(s_rets)
+            jb_col1, jb_col2, jb_col3 = st.columns(3)
+            jb_col1.metric("Jarque-Bera Stat", f"{jb_stat:.2f}")
+            jb_col2.metric("p-value", f"{jb_p:.4f}")
+            if jb_p < 0.05:
+                jb_col3.error("Rejects normality (p < 0.05)")
+            else:
+                jb_col3.success("Fails to reject normality (p >= 0.05)")
 
-        tab_hist, tab_qq = st.tabs(["Histogram & Fit", "Q-Q Plot"])
-        with tab_hist:
-            mu, std = norm.fit(s_rets)
-            fig_h = go.Figure()
-            fig_h.add_trace(go.Histogram(x=s_rets, histnorm='probability density', nbinsx=60))
-            xr = np.linspace(s_rets.min(), s_rets.max(), 100)
-            fig_h.add_trace(go.Scatter(x=xr, y=norm.pdf(xr, mu, std), line=dict(color='red', width=3)))
-            fig_h.update_layout(
-                template="plotly_white",
-                xaxis_title="Daily Return",
-                yaxis_title="Probability Density"
-            )
-            st.plotly_chart(fig_h, width="content")
-        with tab_qq:
-            (osm, osr), (slope, intercept, r) = probplot(s_rets, dist="norm")
-            # Ensure osm is a numpy array to avoid the ValueError
-            osm = np.array(osm) 
-            fig_q = go.Figure()
-            fig_q.add_trace(go.Scatter(x=osm, y=osr, mode='markers', marker=dict(size=4)))
-            lx = np.array([osm.min(), osm.max()])
-            fig_q.add_trace(go.Scatter(x=lx, y=intercept + slope*lx, mode='lines', line=dict(color='red')))
-            fig_q.update_layout(
-                template="plotly_white",
-                xaxis_title="Theoretical Quantiles",
-                yaxis_title="Ordered Values (Actual Returns)"
-            )
-            st.plotly_chart(fig_q, width="content")
-            st.write(f"**R-squared value:** {r**2:.4f}")
+            tab_hist, tab_qq = st.tabs(["Histogram & Fit", "Q-Q Plot"])
+            with tab_hist:
+                mu, std = norm.fit(s_rets)
+                fig_h = go.Figure()
+                fig_h.add_trace(go.Histogram(x=s_rets, histnorm='probability density', nbinsx=60))
+                xr = np.linspace(s_rets.min(), s_rets.max(), 100)
+                fig_h.add_trace(go.Scatter(x=xr, y=norm.pdf(xr, mu, std), line=dict(color='red', width=3)))
+                fig_h.update_layout(
+                    template="plotly_white",
+                    xaxis_title="Daily Return",
+                    yaxis_title="Probability Density"
+                )
+                st.plotly_chart(fig_h, width="content")
+            with tab_qq:
+                (osm, osr), (slope, intercept, r) = probplot(s_rets, dist="norm")
+                # Ensure osm is a numpy array to avoid the ValueError
+                osm = np.array(osm)
+                
+                # Validate osm is not empty before finding min/max
+                if len(osm) > 0:
+                    fig_q = go.Figure()
+                    fig_q.add_trace(go.Scatter(x=osm, y=osr, mode='markers', marker=dict(size=4)))
+                    lx = np.array([osm.min(), osm.max()])
+                    fig_q.add_trace(go.Scatter(x=lx, y=intercept + slope*lx, mode='lines', line=dict(color='red')))
+                    fig_q.update_layout(
+                        template="plotly_white",
+                        xaxis_title="Theoretical Quantiles",
+                        yaxis_title="Ordered Values (Actual Returns)"
+                    )
+                    st.plotly_chart(fig_q, width="content")
+                    st.write(f"**R-squared value:** {r**2:.4f}")
+                else:
+                    st.warning("⚠️ Insufficient data to generate Q-Q plot.")
 
 else:
     st.info("Please enter stock tickers in the sidebar to begin.")
